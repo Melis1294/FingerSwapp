@@ -74,6 +74,8 @@ def grab_frame(cap, tot_frames):
     :return: the captured image
     """
     ret, myFace = cap.read()
+    if ret != True:
+        raise ValueError("Can't read frame")
     myFace = imutils.resize(myFace, width=800)
     myFace = cv2.flip(myFace, 1)
     tot_frames = tot_frames + 1
@@ -91,9 +93,11 @@ def handle_close(event, cap):
 
 
 def main():
+    global oldFace, landmarks_points_oldface, indexes_triangles, landmarks_points_myface, landmarks, convexhullMyFace, onlyMyFace
     fps_start_time = datetime.datetime.now()
     fps = 0
     total_frames = 0
+    screen = 0
 
     indexes_triangles_woman, landmarks_points_face_woman, face_woman = swappedFace("images/Woman.jpg")
     indexes_triangles_man, landmarks_points_face_man, face_man = swappedFace("images/Man.jpg")
@@ -105,7 +109,7 @@ def main():
     fig = plt.figure()
     fig.canvas.mpl_connect("close_event", lambda event: handle_close(event, cap))
     img = None
-    # stop the timer and display FPS information
+
 
     while cap.isOpened():
         # grab the frame from the stream and resize it to have a maximum
@@ -131,6 +135,10 @@ def main():
         cnt = max(contours, key=lambda x: cv2.contourArea(x))
         epsilon = 0.0005 * cv2.arcLength(cnt, True)
         approx = cv2.approxPolyDP(cnt, epsilon, True)
+        hull = cv2.convexHull(cnt)
+        areahull = cv2.contourArea(hull)
+        areacnt = cv2.contourArea(cnt)
+        arearatio=((areahull-areacnt)/areacnt)*100
         hull = cv2.convexHull(approx, returnPoints=False)
         defects = cv2.convexityDefects(approx, hull)
         fingers = 0
@@ -162,11 +170,20 @@ def main():
             cv2.line(roi, start, end, [0, 255, 0], 2)
         fingers += 1
         font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(myFace, fps_txt, (550,50), cv2.FONT_HERSHEY_COMPLEX_SMALL, 1, (255,0,0), 2)
+        cv2.putText(myFace, fps_txt, (550, 50), cv2.FONT_HERSHEY_COMPLEX_SMALL, 1, (255, 0, 0), 2)
 
         if fingers == 1:
-            cv2.putText(myFace, '1st finger - woman face', (0, 50), font, 1, (0, 0, 255), 3, cv2.LINE_AA)
-            indexes_triangles, landmarks_points_oldface, oldFace = apply_face(indexes_triangles_woman, landmarks_points_face_woman, face_woman)
+            if areacnt<2000:
+                cv2.putText(myFace,'Put hand in the box',(0,50), font, 2, (0,0,255), 3, cv2.LINE_AA)
+            else:
+                if arearatio<12:
+                    cv2.putText(myFace,'Put hand in the box',(0,50), font, 2, (0,0,255), 3, cv2.LINE_AA)
+                elif arearatio<17.5:
+                    screen = 1
+
+                else:
+                    cv2.putText(myFace, '1st finger - woman face', (0, 50), font, 1, (0, 0, 255), 3, cv2.LINE_AA)
+                    indexes_triangles, landmarks_points_oldface, oldFace = apply_face(indexes_triangles_woman, landmarks_points_face_woman, face_woman)
 
         elif fingers == 2:
             cv2.putText(myFace, '2nd finger - men face', (0, 50), font, 1, (0, 0, 255), 3, cv2.LINE_AA)
@@ -207,8 +224,8 @@ def main():
                 cv2.fillConvexPoly(maskMyFace, convexhullMyFace, 255)
                 onlyMyFace = cv2.bitwise_and(myFace, myFace, mask=maskMyFace)
 
+            # Triangulation of the old face
             for triangle_index in indexes_triangles:
-                # Triangulation of the old face
                 tr1_pt1 = landmarks_points_oldface[triangle_index[0]]
                 tr1_pt2 = landmarks_points_oldface[triangle_index[1]]
                 tr1_pt3 = landmarks_points_oldface[triangle_index[2]]
@@ -296,6 +313,12 @@ def main():
             (x, y, w, h) = cv2.boundingRect(convexhullMyFace)
             center_face2 = (int((x + x + w) / 2), int((y + y + h) / 2))
             myFace = cv2.seamlessClone(result, myFace, img2_head_mask, center_face2, cv2.NORMAL_CLONE)
+
+            if screen == 1:
+                cv2.imwrite('img2.png', myFace)
+                cv2.imshow("img1", myFace)
+                screen = 0
+
         if img is None:
             img = plt.imshow(cv2.cvtColor(myFace, cv2.COLOR_BGR2RGB))
             plt.axis("off")
