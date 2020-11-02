@@ -1,8 +1,11 @@
+# import the necessary packages
 import cv2
+import imutils
 import matplotlib.pyplot as plt
 import dlib
 import numpy as np
 import math
+import datetime
 
 def swappedFace(path):
     face = cv2.imread(path)
@@ -57,15 +60,25 @@ def extract_index_nparray(nparray):
     return index
 
 
-def grab_frame(cap):
+def apply_face(indexes_triangles, landmarks_points_face, face):
+    this_indexes_triangles = indexes_triangles
+    this_landmarks_points_face = landmarks_points_face
+    this_face = face
+    return this_indexes_triangles, this_landmarks_points_face, this_face
+
+
+def grab_frame(cap, tot_frames):
     """
     Method to grab a frame from the camera
     :param cap: the VideoCapture object
     :return: the captured image
     """
     ret, myFace = cap.read()
+    myFace = imutils.resize(myFace, width=800)
     myFace = cv2.flip(myFace, 1)
-    return myFace
+    tot_frames = tot_frames + 1
+    # update the FPS counter
+    return myFace, tot_frames
 
 
 def handle_close(event, cap):
@@ -78,6 +91,10 @@ def handle_close(event, cap):
 
 
 def main():
+    fps_start_time = datetime.datetime.now()
+    fps = 0
+    total_frames = 0
+
     indexes_triangles_woman, landmarks_points_face_woman, face_woman = swappedFace("images/Woman.jpg")
     indexes_triangles_man, landmarks_points_face_man, face_man = swappedFace("images/Man.jpg")
     indexes_triangles_oldwoman, landmarks_points_face_oldwoman, face_oldwoman = swappedFace("images/oldlady.jpg")
@@ -88,9 +105,20 @@ def main():
     fig = plt.figure()
     fig.canvas.mpl_connect("close_event", lambda event: handle_close(event, cap))
     img = None
+    # stop the timer and display FPS information
 
     while cap.isOpened():
-        myFace = grab_frame(cap)
+        # grab the frame from the stream and resize it to have a maximum
+        # width of 400 pixels
+        myFace, total_frames = grab_frame(cap, total_frames)
+        fps_end_time = datetime.datetime.now()
+        time_diff = fps_end_time - fps_start_time
+        if time_diff.seconds == 0:
+            fps = 0.0                                   #evito errore divisione per zero
+        else:
+            fps = (total_frames / time_diff.seconds)    #frame al secondo
+
+        fps_txt = "FPS: {:.2f}".format(fps)
 
         # Hand Gesture handle
         roi = myFace[100:300, 100:300]
@@ -103,18 +131,14 @@ def main():
         cnt = max(contours, key=lambda x: cv2.contourArea(x))
         epsilon = 0.0005 * cv2.arcLength(cnt, True)
         approx = cv2.approxPolyDP(cnt, epsilon, True)
-        hull = cv2.convexHull(cnt)
-        areahull = cv2.contourArea(hull)
-        areacnt = cv2.contourArea(cnt)
         hull = cv2.convexHull(approx, returnPoints=False)
         defects = cv2.convexityDefects(approx, hull)
-        l = 0
+        fingers = 0
         for i in range(defects.shape[0]):
             s, e, f, d = defects[i, 0]
             start = tuple(approx[s][0])
             end = tuple(approx[e][0])
             far = tuple(approx[f][0])
-            pt = (100, 180)
 
             # find length of all sides of triangle
             a = math.sqrt((end[0] - start[0]) ** 2 + (end[1] - start[1]) ** 2)
@@ -131,39 +155,33 @@ def main():
 
             # ignore angles > 90 and ignore points very close to convex hull(they generally come due to noise)
             if angle <= 90 and d > 30:
-                l += 1
+                fingers += 1
                 cv2.circle(roi, far, 3, [255, 0, 0], -1)
 
             # draw lines around hand
             cv2.line(roi, start, end, [0, 255, 0], 2)
-        l += 1
+        fingers += 1
         font = cv2.FONT_HERSHEY_SIMPLEX
-        value = "images/Man.jpg"
-        if l == 1:
-            cv2.putText(myFace, '1 finger - Woman Face', (0, 50), font, 1, (0, 0, 255), 3, cv2.LINE_AA)
-            indexes_triangles = indexes_triangles_woman
-            landmarks_points_oldface = landmarks_points_face_woman
-            oldFace = face_woman
+        cv2.putText(myFace, fps_txt, (550,50), cv2.FONT_HERSHEY_COMPLEX_SMALL, 1, (255,0,0), 2)
 
-        elif l == 2:
-            cv2.putText(myFace, '2 finger - men Face', (0, 50), font, 1, (0, 0, 255), 3, cv2.LINE_AA)
-            indexes_triangles = indexes_triangles_man
-            landmarks_points_oldface = landmarks_points_face_man
-            oldFace = face_man
-        elif l == 3:
-            cv2.putText(myFace, '3 finger - old man face', (0, 50), font, 1, (0, 0, 255), 3, cv2.LINE_AA)
-            indexes_triangles = indexes_triangles_oldwoman
-            landmarks_points_oldface = landmarks_points_face_oldwoman
-            oldFace = face_oldwoman
-        elif l == 4:
-            cv2.putText(myFace, '4 finger - old women face', (0, 50), font, 1, (0, 0, 255), 3, cv2.LINE_AA)
-            indexes_triangles = indexes_triangles_oldman
-            landmarks_points_oldface = landmarks_points_face_oldman
-            oldFace = face_oldman
+        if fingers == 1:
+            cv2.putText(myFace, '1st finger - woman face', (0, 50), font, 1, (0, 0, 255), 3, cv2.LINE_AA)
+            indexes_triangles, landmarks_points_oldface, oldFace = apply_face(indexes_triangles_woman, landmarks_points_face_woman, face_woman)
+
+        elif fingers == 2:
+            cv2.putText(myFace, '2nd finger - men face', (0, 50), font, 1, (0, 0, 255), 3, cv2.LINE_AA)
+            indexes_triangles, landmarks_points_oldface, oldFace = apply_face(indexes_triangles_man, landmarks_points_face_man, face_man)
+
+        elif fingers == 3:
+            cv2.putText(myFace, '3rd finger - old woman face', (0, 50), font, 1, (0, 0, 255), 3, cv2.LINE_AA)
+            indexes_triangles, landmarks_points_oldface, oldFace = apply_face(indexes_triangles_oldwoman, landmarks_points_face_oldwoman, face_oldwoman)
+
+        elif fingers == 4:
+            cv2.putText(myFace, '4th finger - old man face', (0, 50), font, 1, (0, 0, 255), 3, cv2.LINE_AA)
+            indexes_triangles, landmarks_points_oldface, oldFace = apply_face(indexes_triangles_oldman, landmarks_points_face_oldman, face_oldman)
+
         else:
             cv2.putText(myFace, 'Scegli quali facce utilizzare inserendo valori da 1 a 4', (0, 50), font, 1, (0, 0, 255), 3, cv2.LINE_AA)
-
-
 
 
         # My Face handle
@@ -283,11 +301,16 @@ def main():
             plt.axis("off")
             plt.title("Camera Capture")
             plt.show()
+            key = cv2.waitKey(1)
+            if key == ord('q'):
+                break
+
         else:
             img.set_data(cv2.cvtColor(myFace, cv2.COLOR_BGR2RGB))
             fig.canvas.draw()
             fig.canvas.flush_events()
 
+    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     try:
